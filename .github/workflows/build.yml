@@ -2,22 +2,6 @@ name: Build Manager
 
 on:
   push:
-    tags: [ "*" ]
-    branches: [ "main" ]
-    paths:
-      - '.github/workflows/build.yml'
-      - 'app/**'
-      - 'apd/**'
-      - 'build.gradle.kts'
-      - 'gradle/libs.versions.toml'
-  pull_request:
-    branches: [ "main" ]
-    paths:
-      - '.github/workflows/build.yml'
-      - 'app/**'
-      - 'apd/**'
-      - 'build.gradle.kts'
-      - 'gradle/libs.versions.toml'
   workflow_call:
   workflow_dispatch:
 
@@ -28,7 +12,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@main
         with:
           fetch-depth: 0
 
@@ -41,18 +25,16 @@ jobs:
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@main
         with:
           distribution: temurin
           java-version: 21
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-home-cache-cleanup: true
+        uses: gradle/actions/setup-gradle@main
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@main
         with:
           packages: ''
 
@@ -64,7 +46,7 @@ jobs:
           rustup target install aarch64-linux-android
 
       - name: Cache Rust
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@master
         with:
           workspaces: apd
           cache-targets: false
@@ -79,56 +61,8 @@ jobs:
           ./gradlew clean assembleRelease
           echo "BUILD_TOOL_VERSION=$(ls /usr/local/lib/android/sdk/build-tools/ | tail -n 1)" >> $GITHUB_ENV
 
-      - name: Sign Release
-        env: 
-          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
-        if: ${{ env.SIGNING_KEY != '' }}
-        continue-on-error: true
-        uses: noriban/sign-android-release@v5.1
-        id: sign_app
-        with:
-          releaseDirectory: app/build/outputs/apk/release
-          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
-          alias: ${{ secrets.ALIAS }}
-          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEY_PASSWORD }}
-
       - name: Upload build artifact
-        env: 
-           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
-        if: ${{ env.SIGNING_KEY != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: APatch
-          path: ${{steps.sign_app.outputs.signedReleaseFile}}
-
-      - name: Post to channel
-        if: ${{github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.ref_type != 'tag'}}
-        env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
-          COMMIT_URL: ${{ github.event.head_commit.url }}
-          COMMIT_ID: ${{ github.event.head_commit.id }}
-        run: |
-          if [ ! -z "${{ secrets.BOT_TOKEN }}" ]; then
-            OUTPUT="app/build/outputs/apk/release"
-            export Release=$(find $OUTPUT -name "*.apk")
-            URL=$(python3 .github/scripts/telegram_url.py -1002058433411)
-            curl -v "$URL" -F Release=@${{ steps.sign_app.outputs.signedReleaseFile }}
-            URL=$(python3 .github/scripts/telegram_url.py -1001910818234)
-            curl -v "$URL" -F Release=@${{ steps.sign_app.outputs.signedReleaseFile }}
-          fi
-
-      - name: Release apk
-        env: 
-          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
-        if: ${{ env.SIGNING_KEY != '' && github.ref_type == 'tag' }}
-        continue-on-error: true
-        uses: ncipollo/release-action@v1
-        with:
-          token: ${{ github.token }}
-          tag: ${{ steps.parse_version.outputs.VERSION }}
-          artifacts: ${{steps.sign_app.outputs.signedReleaseFile}}
-          generateReleaseNotes: true
-          makeLatest: true
-          replacesArtifacts: true
+          path: app/build/outputs/apk/release/*
